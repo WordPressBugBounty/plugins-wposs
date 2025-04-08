@@ -15,8 +15,8 @@
    <div class="laobuluo-wbs-header" style="margin-bottom: 15px;">
              <div class="laobuluo-wbs-logo"><a><img src="<?php echo plugin_dir_url( __FILE__ );?>layui/images/logo.png"></a><span class="wbs-span">WPOSS - 阿里云对象存储插件</span><span class="wbs-free">Free V4.9</span></div>
             <div class="laobuluo-wbs-btn">
-                 <a class="layui-btn layui-btn-primary" href="https://www.lezaiyun.com/?utm_source=wposs-setting&utm_media=link&utm_campaign=header" target="_blank"><i class="layui-icon layui-icon-home"></i> 插件主页</a>
-                 <a class="layui-btn layui-btn-primary" href="https://www.lezaiyun.com/wposs.html?utm_source=wposs-setting&utm_media=link&utm_campaign=header" target="_blank"><i class="layui-icon layui-icon-release"></i> 插件教程</a>
+                 <a class="layui-btn layui-btn-primary" href="https://www.laojiang.me/?utm_source=wposs-setting&utm_media=link&utm_campaign=header" target="_blank"><i class="layui-icon layui-icon-home"></i> 插件主页</a>
+                 <a class="layui-btn layui-btn-primary" href="https://www.laojiang.me/5946.html?utm_source=wposs-setting&utm_media=link&utm_campaign=header" target="_blank"><i class="layui-icon layui-icon-release"></i> 插件教程</a>
             </div>
        </div>
  </div>
@@ -233,14 +233,7 @@
                         </div>
                     </div>
 
-                   <div class="laobuluo-panel">
-                            <div class="laobuluo-panel-title">站长必备资源</div>
-                            <div class="laobuluo-shangjia">
-                                <a href="https://www.lezaiyun.com/webmaster-tools.html" target="_blank" title="站长必备资源">
-                                    <img src="<?php echo plugin_dir_url( __FILE__ );?>layui/images/cloud.jpg"></a>
-                                    <p>站长必备的商家、工具资源整理！</p>
-                            </div>
-                        </div>
+                   
 				 	 </div>
 				 </div>
 				 <!-- 右边 end -->
@@ -256,12 +249,12 @@
 				<div class="laobuluo-footer-code">
 					 <span class="codeshow"></span>
 				</div>
-				   <div class="laobuluo-links">
-				   	<a href="https://www.laobuluo.com/?utm_source=wpftp-setting&utm_media=link&utm_campaign=footer"  target="_blank">老部落</a>
-					   <a href="https://www.lezaiyun.com/?utm_source=wposs-setting&utm_media=link&utm_campaign=footer"  target="_blank">乐在云</a>					   
-					   <a href="https://www.lezaiyun.com/wposs.html?utm_source=wposs-setting&utm_media=link&utm_campaign=footer"  target="_blank">使用说明</a> 
-					   <a href="https://www.lezaiyun.com/about/?utm_source=wposs-setting&utm_media=link&utm_campaign=footer"  target="_blank">关于我们</a>
-					   </div>
+				<div class="laobuluo-links">
+                    <a href="https://www.laobuluo.com/?utm_source=lbs-setting&utm_media=link&utm_campaign=footer"  target="_blank">老部落</a>
+                    <a href="https://www.lezaiyun.com/?utm_source=lbs-setting&utm_media=link&utm_campaign=footer" target="_blank">乐在云工作室</a>
+                    <a href="https://www.laojiang.me/5946.html?utm_source=lbs-setting&utm_media=link&utm_campaign=footer" target="_blank">使用说明</a>
+                    <a href="https://www.laojiang.me/aboutus/?utm_source=lbs-setting&utm_media=link&utm_campaign=footer" target="_blank">关于我们</a>
+                </div>
 			   </div>
 		   </div>
 	   </div>

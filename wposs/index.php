@@ -1,11 +1,11 @@
 <?php
 /**
 Plugin Name: WPOSS(阿里云对象存储)
-Plugin URI: https://www.lezaiyun.com/wposs.html
+Plugin URI: https://www.laojiang.me/5946.html
 Description: WordPress同步附件内容远程至阿里云OSS对象存储中，实现网站数据与静态资源分离，提高网站加载速度。微信公众号：  <font color="red">老蒋朋友圈</font>
 Version: 4.9
 Author: 老蒋和他的小伙伴
-Author URI: https://www.lezaiyun.com
+Author URI: https://www.laojiang.me
  */
 if (!defined('ABSPATH')) die();
 
