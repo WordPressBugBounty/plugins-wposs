@@ -1,13 +1,15 @@
 === WPOSS阿里云对象存储 ===
 Contributors: laobuluo
-Donate link: https://www.laojiang.me/donate/
+Donate link: https://www.lezaiyun.com/donate/
 Tags:阿里云oss,oss,对象存储,wordpress oss
-Requires at least: 4.5.0
-Tested up to: 6.7.2
-Stable tag: 4.9
-Requires PHP: 5.6
+Requires at least: 5.5
+Tested up to: 6.9.1
+Stable tag: 5.0
+Requires PHP: 7.4
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
+
+WordPress阿里云对象存储插件（简称:WPOSS），基于阿里云OSS对象存储与WordPress实现静态资源到OSS存储。支持阿里云OSS图片编辑，水印、裁剪、压缩等。
 
 == Description ==
 
@@ -25,13 +27,13 @@ WordPress阿里云对象存储插件（简称:WPOSS），基于阿里云OSS对�
 8. 支持本地和对象存储分离和同步
 9. 2020年重构代码改变传统逻辑模型
 
-阿里云对象存储插件安装方法：[https://www.laojiang.me/5946.html](https://www.laojiang.me/5946.html)
+阿里云对象存储插件安装方法：[https://www.lezaiyun.com/?p=1095](https://www.lezaiyun.com/?p=1095)
 
 ## 网站支持
 
 * [老蒋玩运营](https://www.laojiang.me/ "老蒋玩运营")
 
-* [乐在云](https://www.lezaiyun.com/ "乐在云工作室")
+* [主机评价网](https://www.zhujipingjia.com/ "主机评价网")
 
 * 欢迎加入插件和站长微信公众号：老蒋朋友圈（公众号）
 
@@ -54,6 +56,15 @@ WordPress阿里云对象存储插件（简称:WPOSS），基于阿里云OSS对�
 2. screenshot-2.png
 
 == Changelog ==
+
+= 5.0 =
+* 修复「不在本地保留备份」功能：勾选后于请求结束时删除本地文件，不再影响上传流程
+* 修复 legacy_data_replace 的 SQL 注入风险
+* 修复 PHP 8.x 兼容性（Exception 命名空间、restore_options、sanitize_file_name_handler 等）
+* 修复 OSS 上传失败时的异常处理
+* 增加表单安全校验（wp_nonce_field、esc_html 等）
+* 精简设置页：移除图像处理、一键替换 OSS 地址等选项
+* 移动端隐藏「关注公众号」侧栏
 
 = 4.9 =
 * 微调样式
@@ -121,4 +132,6 @@ WordPress阿里云对象存储插件（简称:WPOSS），基于阿里云OSS对�
 * 本插件经过几周的测试，支持最新的WordPress程序，现予以发布。
 
 == Upgrade Notice ==
-* 
+
+= 5.0 =
+修复「不在本地保留备份」功能，提升安全性与 PHP 8 兼容性，建议升级。 

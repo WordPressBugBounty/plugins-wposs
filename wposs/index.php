@@ -1,13 +1,23 @@
 <?php
 /**
-Plugin Name: WPOSS(阿里云对象存储)
-Plugin URI: https://www.laojiang.me/5946.html
-Description: WordPress同步附件内容远程至阿里云OSS对象存储中，实现网站数据与静态资源分离，提高网站加载速度。微信公众号：  <font color="red">老蒋朋友圈</font>
-Version: 4.9
-Author: 老蒋和他的小伙伴
-Author URI: https://www.laojiang.me
+ * Plugin Name: WPOSS(阿里云对象存储)
+ * Plugin URI: https://www.lezaiyun.com/1095.html
+ * Description: WordPress同步附件内容远程至阿里云OSS对象存储中，实现网站数据与静态资源分离，提高网站加载速度。微信公众号：  <font color="red">老蒋朋友圈</font>
+ * Version: 5.0
+ * Author: 老蒋和他的小伙伴
+ * Author URI: https://www.lezaiyun.com
+ * Requires PHP: 7.4
  */
-if (!defined('ABSPATH')) die();
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+if (version_compare(PHP_VERSION, '7.4', '<')) {
+    add_action('admin_notices', function () {
+        echo '<div class="notice notice-error"><p><strong>WPOSS</strong> 需要 PHP 7.4 或更高版本，当前版本：' . esc_html(PHP_VERSION) . '。请升级 PHP 后重新激活插件。</p></div>';
+    });
+    return;
+}
 
 use WPOSS\Api;
 
@@ -18,7 +28,7 @@ if (!class_exists('WPOSS')) {
         private $menu_title      = 'WPOSS设置';                    // 设置菜单的菜单名
         private $page_title      = 'WPOSS设置';                    // 设置菜单的页面title
         private $capability      = 'manage_options';              // 设置页面管理所需权限
-        private $version         = '4.9';                         // 插件数据版本， 每次修改应与上方的Version值相同
+        private $version         = '5.0';                         // 插件数据版本， 每次修改应与上方的Version值相同
         private $setting_notices = [
                     'update_success' => '设置已保存',              // post数据保存成功时提示内容
                     'update_failed'  => '插件设置更新失败',  // 失败时提示
@@ -30,6 +40,7 @@ if (!class_exists('WPOSS')) {
         private $wp_upload_dir;
         private $object_storage;
         private $options;
+        private static $pending_local_deletes = array();
 
         function __construct() {
             # 插件 activation 函数当一个插件在 WordPress 中”activated(启用)”时被触发。
@@ -40,7 +51,8 @@ if (!class_exists('WPOSS')) {
             $this->constants();
 
             # 避免上传插件/主题被同步到对象存储
-            if (substr_count($_SERVER['REQUEST_URI'], '/update.php') <= 0) {
+            $req_uri = isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : '';
+            if (strpos($req_uri, '/update.php') === false) {
                 add_filter('wp_handle_upload', array($this, 'upload_attachments'));
                 if ( version_compare(get_bloginfo('version'), 5.3, '<') ){
                     add_filter( 'wp_update_attachment_metadata', array($this, 'upload_and_thumbs') );
@@ -50,7 +62,7 @@ if (!class_exists('WPOSS')) {
                 }
             }
 
-            if ($this->object_storage->is_client()) {
+            if ($this->object_storage && $this->object_storage->is_client()) {
                 # 检测不重复的文件名
                 add_filter('wp_unique_filename', array($this, 'unique_filename') );
             }
@@ -75,50 +87,77 @@ if (!class_exists('WPOSS')) {
             $this->base_folder = plugin_basename(dirname(__FILE__));
             $this->wp_upload_dir = wp_get_upload_dir();
             $this->options = get_option($this->option_name);
-            # PHP7.4 版本后，对于bool值作为array调用时，会产生警告内容。
             if (!is_array($this->options)) {
                 $this->init_options();
             }
-            $this->object_storage = new Api($this->options);  // option更新后，若变动了参数，则Api实例的重新创建，目前只有setting中会触发
+            $this->object_storage = new Api(is_array($this->options) ? $this->options : array());
+        }
+
+        /**
+         * 上传前确保使用最新配置（ajax 上传时可能使用与主页面不同的加载时机）
+         */
+        private function ensure_oss_client() {
+            if ($this->object_storage && $this->object_storage->is_client()) {
+                return;
+            }
+            $this->options = get_option($this->option_name);
+            if (!is_array($this->options)) {
+                $this->options = array();
+            }
+            if (defined('WP_DEBUG') && WP_DEBUG && function_exists('error_log')) {
+                $hasCreds = !empty($this->options['accessKeyId']) && !empty($this->options['bucket']) && !empty($this->options['endpoint']);
+                if (!$hasCreds) {
+                    error_log('[WPOSS] ensure_oss_client: 配置缺失 accessKeyId/bucket/endpoint');
+                }
+            }
+            $this->object_storage = new Api($this->options);
         }
 
         /**
          * 文件上传功能基础函数，被其它需要进行文件上传的模块调用
-         * @param $key  : 远端需要的Key值[包含路径]
-         * @param $file_local_path : 文件在本地的路径。
-         *
-         * @return bool  : 暂未想好如何与wp进行响应。
-
+         * @param string $key 远端 Key（包含路径）
+         * @param string $file_local_path 本地路径
+         * @return bool
          */
         public function _file_upload($key, $file_local_path) {
-            ### 上传文件
-            # 由于增加了独立文件名钩子对cos中同名文件的判断，避免同名文件的存在，因此这里直接覆盖上传。
+            $this->ensure_oss_client();
+            // 确保使用最新配置（ajax 上传等场景下 $this->options 可能未刷新）
+            $this->options = get_option($this->option_name);
+            if (!is_array($this->options)) {
+                $this->options = array();
+            }
             try {
                 $this->object_storage->Upload(
                     $this->key_handler($key, get_option('upload_url_path')),
                     $file_local_path
                 );
-                // 如果上传成功，且不再本地保存，在此删除本地文件
-                if ($this->options['no_local_file']) {
-                    $this->delete_local_file($file_local_path);
-                }
                 return True;
             } catch (\Exception $e) {
-                return False;
+                if (defined('WP_DEBUG') && WP_DEBUG && function_exists('error_log')) {
+                    $errDetail = $e->getMessage();
+                    if ($e instanceof \OSS\Core\OssException) {
+                        $errDetail = 'OSS: ' . (method_exists($e, 'getHTTPStatus') ? 'HTTP=' . $e->getHTTPStatus() . ' ' : '')
+                            . (method_exists($e, 'getErrorCode') ? 'Code=' . $e->getErrorCode() . ' ' : '') . $errDetail;
+                    }
+                    error_log('[WPOSS] 上传失败: ' . $errDetail . ' | key: ' . $key . ' | path: ' . $file_local_path);
+                }
+                return false;
             }
         }
 
-        private function remote_key_exist( $filename ) {
-            return $this->object_storage->hasExist( $this->key_handler($this->wp_upload_dir['subdir'] . "/$filename",
-                get_option('upload_url_path')));
+        private function remote_key_exist($filename) {
+            $subdir = isset($this->wp_upload_dir['subdir']) ? $this->wp_upload_dir['subdir'] : '';
+            return $this->object_storage->hasExist($this->key_handler($subdir . '/' . $filename, get_option('upload_url_path') ?: ''));
         }
 
         /**
          * 删除远程附件（包括图片的原图）
-         *   这里全部以非/开头，因此上传的函数中也要替换掉key中开头的/
-         * @param $post_id
+         * @param int $post_id 附件 ID
          */
         public function delete_remote_attachment($post_id) {
+            if (!$this->object_storage || !$this->object_storage->is_client()) {
+                return;
+            }
             // 获取要删除的对象Key的数组
             $deleteObjects = array();
             $meta = wp_get_attachment_metadata( $post_id );
@@ -181,7 +220,8 @@ if (!class_exists('WPOSS')) {
                 ),
             );
 
-            if(!$this->options){
+            $this->options = $this->options ?? get_option($this->option_name);
+            if (!$this->options || !is_array($this->options)) {
                 if (add_option($this->option_name, $options, '', 'yes')) {
                     $this->options = get_option($this->option_name);
                 }
@@ -196,6 +236,9 @@ if (!class_exists('WPOSS')) {
         }
 
         public function restore_options () {
+            if (!is_array($this->options)) {
+                $this->options = get_option($this->option_name) ?: array();
+            }
             $this->options['backup_url_path'] = get_option('upload_url_path');
             if (update_option($this->option_name, $this->options)) {  // 此处修改的参数不影响对象存储实例
                 $this->options = get_option($this->option_name);      // 上面的赋值及更新，这里似乎不用再重新获取。 - -!
@@ -209,19 +252,52 @@ if (!class_exists('WPOSS')) {
          * @param $upload_url_path
          * @return string
          */
-        private function key_handler($key, $upload_url_path){
-            # 参数2 为了减少option的获取次数
-            $url_parse = wp_parse_url($upload_url_path);
-            # 约定url不要以/结尾，减少判断条件
-            if (array_key_exists('path', $url_parse)) {
+        private function key_handler($key, $upload_url_path) {
+            $url_parse = wp_parse_url($upload_url_path ?: '');
+            $url_parse = is_array($url_parse) ? $url_parse : array();
+            # 约定url不要以/结尾，当 path 存在且非空时才拼接
+            if (!empty($url_parse['path'])) {
                 if ( substr($key, 0, 1) == '/' ) {
                     $key = $url_parse['path'] . $key;
                 } else {
                     $key = $url_parse['path'] . '/' . $key;
                 }
             }
-            # $url_parse['path'] 以/开头，在七牛环境下不能以/开头，所以需要处理掉
-            return ltrim($key, '/');
+            return ltrim((string) $key, '/');
+        }
+
+        /**
+         * 将待删除路径加入队列，请求结束时统一删除（避免影响 WP 图片处理流程）
+         * @param array $paths 本地文件路径数组
+         */
+        private function queue_local_deletes($paths) {
+            $opts = get_option($this->option_name);
+            if (empty($opts['no_local_file']) || !is_array($opts) || !is_array($paths)) {
+                return;
+            }
+            foreach ($paths as $p) {
+                if (is_string($p) && $p !== '' && file_exists($p)) {
+                    self::$pending_local_deletes[$p] = true;
+                }
+            }
+            if (!empty(self::$pending_local_deletes) && !has_action('shutdown', array($this, 'flush_pending_local_deletes'))) {
+                add_action('shutdown', array($this, 'flush_pending_local_deletes'), 999);
+            }
+        }
+
+        /**
+         * 请求结束时执行：删除队列中的本地文件
+         */
+        public function flush_pending_local_deletes() {
+            if (empty(self::$pending_local_deletes)) {
+                return;
+            }
+            foreach (array_keys(self::$pending_local_deletes) as $path) {
+                if (file_exists($path)) {
+                    $this->delete_local_file($path);
+                }
+            }
+            self::$pending_local_deletes = array();
         }
 
         /**
@@ -231,14 +307,55 @@ if (!class_exists('WPOSS')) {
          */
         public function delete_local_file($file_path) {
             try {
-                if (!@file_exists($file_path)) {  # 文件不存在
+                if (!is_string($file_path) || $file_path === '') {
+                    return FALSE;
+                }
+                if (!file_exists($file_path)) {
                     return TRUE;
                 }
-                if (!@unlink($file_path)) { # 删除文件
+                $udir = wp_get_upload_dir();
+                $basedir = isset($udir['basedir']) ? trim($udir['basedir']) : '';
+                if ($basedir === '') {
+                    if (defined('WP_DEBUG') && WP_DEBUG && function_exists('error_log')) {
+                        error_log('[WPOSS] delete_local_file: basedir 为空');
+                    }
+                    return FALSE;
+                }
+                $real = realpath($file_path);
+                $base_real = realpath($basedir);
+                if ($real === false || $base_real === false) {
+                    if (defined('WP_DEBUG') && WP_DEBUG && function_exists('error_log')) {
+                        error_log('[WPOSS] delete_local_file realpath 失败: file=' . $file_path . ' base=' . $basedir);
+                    }
+                    return FALSE;
+                }
+                $real_n = str_replace(array('\\', '/'), '/', $real);
+                $base_n = str_replace(array('\\', '/'), '/', $base_real);
+                $base_n = rtrim($base_n, '/');
+                if (strpos($real_n, $base_n) !== 0) {
+                    if (defined('WP_DEBUG') && WP_DEBUG && function_exists('error_log')) {
+                        error_log('[WPOSS] delete_local_file 路径不在 uploads 内: real=' . $real_n . ' base=' . $base_n);
+                    }
+                    return FALSE;
+                }
+                $after = substr($real_n, strlen($base_n), 1);
+                if ($after !== '' && $after !== '/') {
+                    if (defined('WP_DEBUG') && WP_DEBUG && function_exists('error_log')) {
+                        error_log('[WPOSS] delete_local_file 路径校验失败 after=' . $after);
+                    }
+                    return FALSE;
+                }
+                if (!@unlink($file_path)) {
+                    if (defined('WP_DEBUG') && WP_DEBUG && function_exists('error_log')) {
+                        error_log('[WPOSS] delete_local_file unlink 失败(权限?): ' . $file_path);
+                    }
                     return FALSE;
                 }
                 return TRUE;
-            } catch (Exception $ex) {
+            } catch (\Exception $ex) {
+                if (defined('WP_DEBUG') && WP_DEBUG && function_exists('error_log')) {
+                    error_log('[WPOSS] delete_local_file 异常: ' . $ex->getMessage());
+                }
                 return FALSE;
             }
         }
@@ -249,23 +366,44 @@ if (!class_exists('WPOSS')) {
          * @return array $metadata: 附件元数据
          * 官方的钩子文档上写了可以添加 $attachment_id 参数，但实际测试过程中部分wp接收到不存在的参数时会报错，上传失败，返回报错为“HTTP错误”
          */
-        public function upload_and_thumbs( $metadata ) {
-            if (isset( $metadata['file'] )) {
-                # 1.先上传主图
-                $attachment_key = $metadata['file'];  // 远程key路径, 此路径不是以/开头
-                $attachment_local_path = $this->wp_upload_dir['basedir'] . '/' . $attachment_key;  # 在本地的存储路径
-                $this->_file_upload($attachment_key, $attachment_local_path);  # 调用上传函数
+        public function upload_and_thumbs( $metadata, $attachment_id = 0 ) {
+            if (!isset($metadata['file'])) {
+                return $metadata;
             }
+            $udir = wp_get_upload_dir();
+            $basedir = isset($udir['basedir']) ? rtrim($udir['basedir'], '/\\') : '';
+            if ($basedir === '') {
+                return $metadata;
+            }
+            # 1.先上传主图（优先从 attachment 获取实际路径，更可靠）
+            $attachment_key = $metadata['file'];
+            $main_file = $attachment_id ? wp_get_attached_file($attachment_id) : '';
+            $attachment_local_path = ($main_file !== '' && file_exists($main_file)) ? $main_file : ($basedir . '/' . $attachment_key);
+            $this->_file_upload($attachment_key, $attachment_local_path);
 
-            # 如果存在缩略图则上传缩略图
-            if (isset($metadata['sizes']) && count($metadata['sizes']) > 0) {
+            # 2.上传缩略图
+            if (isset($metadata['sizes']) && is_array($metadata['sizes'])) {
+                $file_dir = $main_file ? dirname($main_file) : ($basedir . '/' . dirname($metadata['file']));
                 foreach ($metadata['sizes'] as $val) {
-                    $attachment_thumbs_key = dirname($metadata['file']) . '/' . $val['file'];  // 生成object 的 key
-                    $attachment_thumbs_local_path = $this->wp_upload_dir['basedir'] . '/' . $attachment_thumbs_key;  // 本地存储路径
-                    $this->_file_upload($attachment_thumbs_key, $attachment_thumbs_local_path);  //调用上传函数
+                    if (!isset($val['file'])) {
+                        continue;
+                    }
+                    $attachment_thumbs_key = dirname($metadata['file']) . '/' . $val['file'];
+                    $thumbs_path = $file_dir . '/' . $val['file'];
+                    $this->_file_upload($attachment_thumbs_key, $thumbs_path);
                 }
             }
-
+            # 3.勾选“不在本地保留”时，请求结束时删除本地文件
+            $paths = array($attachment_local_path);
+            if (isset($metadata['sizes']) && is_array($metadata['sizes'])) {
+                $file_dir = $main_file ? dirname($main_file) : ($basedir . '/' . dirname($metadata['file']));
+                foreach ($metadata['sizes'] as $val) {
+                    if (isset($val['file'])) {
+                        $paths[] = $file_dir . '/' . $val['file'];
+                    }
+                }
+            }
+            $this->queue_local_deletes($paths);
             return $metadata;
         }
 
@@ -279,22 +417,27 @@ if (!class_exists('WPOSS')) {
          * @return array  $upload
          */
         public function upload_attachments ($upload) {
+            if (!is_array($upload) || !isset($upload['type'], $upload['file'])) {
+                return $upload;
+            }
             $mime_types       = get_allowed_mime_types();
             $image_mime_types = array(
-                // Image formats.
-                $mime_types['jpg|jpeg|jpe'],
-                $mime_types['gif'],
-                $mime_types['png'],
-                $mime_types['bmp'],
-                $mime_types['tiff|tif'],
-                $mime_types['ico'],
+                $mime_types['jpg|jpeg|jpe'] ?? '',
+                $mime_types['gif'] ?? '',
+                $mime_types['png'] ?? '',
+                $mime_types['bmp'] ?? '',
+                $mime_types['tiff|tif'] ?? '',
+                $mime_types['ico'] ?? '',
             );
-            if ( ! in_array( $upload['type'], $image_mime_types ) ) {
-                $key        = str_replace( $this->wp_upload_dir['basedir'] . '/', '', $upload['file'] );
-                $local_path = $upload['file'];
-                $this->_file_upload( $key, $local_path);
+            if (!in_array($upload['type'], $image_mime_types)) {
+                $udir = wp_get_upload_dir();
+                $basedir = isset($udir['basedir']) ? $udir['basedir'] : '';
+                $full = str_replace('\\', '/', $upload['file']);
+                $base = $basedir !== '' ? str_replace('\\', '/', rtrim($basedir, '/\\')) : '';
+                $key = $base !== '' && strpos($full, $base) === 0 ? ltrim(substr($full, strlen($base)), '/') : basename($upload['file']);
+                $this->_file_upload($key, $upload['file']);
+                $this->queue_local_deletes(array($upload['file']));
             }
-
             return $upload;
         }
 
@@ -321,7 +464,7 @@ if (!class_exists('WPOSS')) {
          * 参数 $ext 在官方钩子文档中可以使用，部分 WP 版本因为多了这个参数就会报错。 返回“HTTP错误”
          */
         public function unique_filename( $filename ) {
-            $ext = '.' . pathinfo( $filename, PATHINFO_EXTENSION );
+            $ext = '.' . (is_string($filename) ? pathinfo($filename, PATHINFO_EXTENSION) : '');
             $number = '';
 
             while ( $this->remote_key_exist( $filename ) ) {
@@ -337,11 +480,11 @@ if (!class_exists('WPOSS')) {
         }
 
         public function sanitize_file_name_handler( $filename ){
-            if ($this->options['opt']['auto_rename']) {
-                return date("YmdHis") . "" . mt_rand(100, 999) . "." . pathinfo($filename, PATHINFO_EXTENSION);
-            } else {
-                return $filename;
+            if (!empty($this->options['opt']['auto_rename']) && is_string($filename) && $filename !== '') {
+                $ext = pathinfo($filename, PATHINFO_EXTENSION);
+                return date('YmdHis') . mt_rand(100, 999) . '.' . ($ext !== '' ? $ext : 'jpg');
             }
+            return is_string($filename) ? $filename : '';
         }
 
         /** 根据提交数据进行缩略图设置修改与备份。 (暂时取消在这一步对插件参数更新的步骤，留到后面一起进行更新)
@@ -389,15 +532,21 @@ if (!class_exists('WPOSS')) {
             if(in_array(get_option('upload_path'), ["", "wp-content/uploads"])){
                 global $wpdb;
                 $originalContent = home_url('/wp-content/uploads');
-                $newContent = get_option('upload_url_path');
+                $newContent = get_option('upload_url_path') ?: '';
 
-                # 文章内容文字/字符替换
+                # 文章内容文字/字符替换（使用 prepare 防止 SQL 注入）
                 $result = $wpdb->query(
-                    "UPDATE {$wpdb->prefix}posts SET `post_content` = REPLACE( `post_content`, '{$originalContent}', '{$newContent}');"
+                    $wpdb->prepare(
+                        "UPDATE {$wpdb->prefix}posts SET post_content = REPLACE(post_content, %s, %s)",
+                        $originalContent,
+                        $newContent
+                    )
                 );
 
+                $this->options['opt'] = isset($this->options['opt']) ? $this->options['opt'] : array();
                 $this->options['opt']['legacy_data_replace'] = 1;  # 值为1 表示已完成替换
             } else {
+                $this->options['opt'] = isset($this->options['opt']) ? $this->options['opt'] : array();
                 $this->options['opt']['legacy_data_replace'] = 2;  # 值为2 表示upload_path非初始默认值，无法替换，建议使用wpreplace插件替换
             }
             update_option($this->option_name, $this->options);  // 文字替换，参数变动不影响Api实例
@@ -405,19 +554,19 @@ if (!class_exists('WPOSS')) {
         }
 
         public function image_display_processing($content){
-            if ( isset($this->options['opt']['img_process'])
-                && $this->options['opt']['img_process']['switch'] ) {
-                $media_url = get_option('upload_url_path');
-                $pattern = '#<img[\s\S]*?src\s*=\s*[\"|\'](.*?)[\"|\'][\s\S]*?>#ims';  // img匹配正则
+            if (!empty($this->options['opt']['img_process']['switch'])) {
+                $media_url = get_option('upload_url_path') ?: '';
+                $style_value = $this->options['opt']['img_process']['style_value'] ?? '';
+                $pattern = '#<img[\s\S]*?src\s*=\s*[\"|\'](.*?)[\"|\'][\s\S]*?>#ims';
                 $content = preg_replace_callback(
                     $pattern,
-                    function($matches) use ($media_url) {
-                        if (strpos($matches[1], $media_url) === false) {
+                    function($matches) use ($media_url, $style_value) {
+                        if ($media_url === '' || strpos($matches[1], $media_url) === false) {
                             return $matches[0];
                         } else {
                             return str_replace(
                                 $matches[1],
-                                $matches[1] . $this->image_display_default_tab . $this->options['opt']['img_process']['style_value'],
+                                $matches[1] . $this->image_display_default_tab . $style_value,
                                 $matches[0]);
                         }
                     },
@@ -427,18 +576,16 @@ if (!class_exists('WPOSS')) {
         }
 
         private function set_img_process_handle($options, $img_process){
-            if( isset($img_process['img_process_switch']) ){
-                $options['opt']['img_process']['switch'] = True;
-                switch( sanitize_text_field(trim(stripslashes($img_process['img_process_style_choice']))) ){
-                    case "0":
-                        $options['opt']['img_process']['style_value'] = $this->image_display_default_value;
-                        break;
-                    case "1":
-                        $options['opt']['img_process']['style_value'] = sanitize_text_field(trim(stripslashes($img_process['img_process_style_customize'])));
-                        break;
-                }
+            $options['opt'] = isset($options['opt']) ? $options['opt'] : array();
+            $options['opt']['img_process'] = isset($options['opt']['img_process']) ? $options['opt']['img_process'] : array('switch' => false, 'style_value' => '');
+            if (!empty($img_process['img_process_switch'])) {
+                $options['opt']['img_process']['switch'] = true;
+                $choice = isset($img_process['img_process_style_choice']) ? sanitize_text_field(trim(stripslashes($img_process['img_process_style_choice']))) : '0';
+                $options['opt']['img_process']['style_value'] = ($choice === '1' && isset($img_process['img_process_style_customize']))
+                    ? sanitize_text_field(trim(stripslashes($img_process['img_process_style_customize'])))
+                    : $this->image_display_default_value;
             } else {
-                $options['opt']['img_process']['switch'] = False;
+                $options['opt']['img_process']['switch'] = false;
             }
             return $options;
         }
@@ -464,8 +611,14 @@ if (!class_exists('WPOSS')) {
             if (!current_user_can( $this->capability )) wp_die('Insufficient privileges!');
 
             $this->options = get_option($this->option_name);
-            if ($this->options && isset($_GET['_wpnonce']) && wp_verify_nonce($_GET['_wpnonce']) && !empty($_POST)) {
-                if($_POST['type'] == 'info_set') {
+            if (!is_array($this->options)) {
+                $this->options = array('bucket' => '', 'endpoint' => '', 'accessKeyId' => '', 'accessKeySecret' => '', 'opt' => array(), 'no_local_file' => false, 'cname' => false);
+            }
+            $this->options['opt'] = isset($this->options['opt']) ? $this->options['opt'] : array();
+            $nonce = isset($_POST['_wpnonce']) ? $_POST['_wpnonce'] : (isset($_GET['_wpnonce']) ? $_GET['_wpnonce'] : '');
+            $nonce_ok = $nonce && wp_verify_nonce(sanitize_text_field(wp_unslash($nonce)), 'wposs_settings');
+            if ($nonce_ok && !empty($_POST)) {
+                if (isset($_POST['type']) && $_POST['type'] === 'info_set') {
                     $this->options['bucket'] = isset($_POST['bucket']) ? sanitize_text_field(trim(stripslashes($_POST['bucket']))) : '';
                     $this->options['endpoint'] = isset($_POST['endpoint']) ? sanitize_text_field(trim(stripslashes($_POST['endpoint']))) : '';
                     $this->options['accessKeyId'] = isset($_POST['accessKeyId']) ? sanitize_text_field(trim(stripslashes($_POST['accessKeyId']))) : '';
@@ -476,12 +629,13 @@ if (!class_exists('WPOSS')) {
                     $this->options = $this->set_img_process_handle($this->options, $_POST);  // 更新数据万象设置，返回options，但未调用update_option
                     $this->options = $this->set_thumbsize_handler($this->options, isset($_POST['disable_thumb']) );
 
-                    update_option('upload_url_path', esc_url_raw(trim(stripslashes($_POST['upload_url_path']))));
+                    $upload_url = isset($_POST['upload_url_path']) ? esc_url_raw(trim(stripslashes($_POST['upload_url_path']))) : '';
+                    update_option('upload_url_path', $upload_url);
                     update_option($this->option_name, $this->options);
                     $this->object_storage = new Api($this->options);
                     # 原本想做update_option判断，但内容不改变时返回值为0，会当作失败处理，从业务逻辑上不合理。
                     ?>
-                        <div class="notice notice-success settings-error is-dismissible"><p><?php echo($this->setting_notices['update_success']); ?></p></div>
+                        <div class="notice notice-success settings-error is-dismissible"><p><?php echo esc_html($this->setting_notices['update_success']); ?></p></div>
                     <?php
 
                 } else if ($_POST['type'] == 'info_replace') {

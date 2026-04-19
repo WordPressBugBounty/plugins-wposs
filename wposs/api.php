@@ -1,4 +1,8 @@
 <?php
+/**
+ * WPOSS API - 阿里云 OSS 接口封装
+ * 保持与旧版一致的 options 传递方式，仅修复 OSSClient 拼写及 PHP 兼容性
+ */
 namespace WPOSS;
 
 if (is_file(__DIR__ . '/sdk/aliyun-oss-php-sdk/autoload.php')) {
@@ -17,93 +21,126 @@ class Api {
 
     public function __construct($options = array()) {
         $this->options = $options;
-        // 阿里云主账号AccessKey拥有所有API的访问权限，风险很高。
-        // 强烈建议您创建并使用RAM账号进行API访问或日常运维，请登录 https://ram.console.aliyun.com 创建RAM账号。
-        // Endpoint以杭州为例，其它Region请按实际情况填写。
-        // 说明 使用自定义域名时，无法使用listBuckets方法。
+        if (!is_array($this->options)) {
+            $this->options = array();
+        }
 
         try {
-            $this->client = new OssClient($this->options['accessKeyId'], $this->options['accessKeySecret'], $this->options['endpoint'], $this->options['cname']);
-            if (!$this->client->doesBucketExist($this->options['bucket'])) {
-                $this->client =  Null;
-                $this->errors[] = "Bucket 不存在！";
-            };
+            $accessKeyId = isset($this->options['accessKeyId']) ? $this->options['accessKeyId'] : '';
+            $accessKeySecret = isset($this->options['accessKeySecret']) ? $this->options['accessKeySecret'] : '';
+            $endpoint = isset($this->options['endpoint']) ? $this->options['endpoint'] : '';
+            $bucket = isset($this->options['bucket']) ? $this->options['bucket'] : '';
+            $cname = isset($this->options['cname']) ? $this->options['cname'] : false;
+
+            if (empty($accessKeyId) || empty($accessKeySecret) || empty($endpoint) || empty($bucket)) {
+                $this->errors[] = '配置不完整，请检查 Bucket/Endpoint/AccessKey 是否已填写';
+                return;
+            }
+
+            $this->client = new OssClient($accessKeyId, $accessKeySecret, $endpoint, $cname);
+
+            try {
+                if (!$this->client->doesBucketExist($bucket)) {
+                    $this->client = null;
+                    $this->errors[] = "Bucket 不存在或无法访问: {$bucket}";
+                }
+            } catch (OssException $e) {
+                $msg = trim($e->getMessage());
+                // 空消息或仅 " :  RequestId: " 多为网络/连接失败，保留 client 让首次上传尝试
+                if ($msg === '' || preg_match('/^[\s:]*RequestId:\s*$/i', $msg)) {
+                    if (defined('WP_DEBUG') && WP_DEBUG && function_exists('error_log')) {
+                        $httpStatus = method_exists($e, 'getHTTPStatus') ? $e->getHTTPStatus() : '';
+                        $code = method_exists($e, 'getErrorCode') ? $e->getErrorCode() : '';
+                        error_log('[WPOSS] Bucket 检测跳过(疑似网络/连接异常): HTTP=' . $httpStatus . ' Code=' . $code . ' endpoint=' . $endpoint);
+                    }
+                    // 保留 client，首次上传时再判断
+                } else {
+                    $this->client = null;
+                    $this->errors[] = $msg ?: 'Bucket 检测失败，请检查网络与 Endpoint';
+                }
+            }
         } catch (OssException $e) {
-            $this->errors[] = $e->getMessage();
+            $this->client = null;
+            $msg = trim($e->getMessage());
+            $this->errors[] = $msg !== '' ? $msg : 'OSS 连接异常，请检查 AccessKey 和 Endpoint';
+        } catch (\Throwable $e) {
+            $this->client = null;
+            $this->errors[] = '初始化失败: ' . $e->getMessage();
         }
     }
 
     public function is_client() {
-        return $this->client instanceof OSSClient;
+        return $this->client instanceof OssClient;
     }
 
-    /**
-     * 判断bucket是否存在
-     * @param $accessKeyId : $accessKeyId
-     * @param $accessKeySecret :
-     * @param $endpoint :
-     * @param $bucket : bucket name
-     * @return array, 1 (存在), 0 (不存在), -1 (异常)
-     */
     static public function does_bucket_exist($accessKeyId, $accessKeySecret, $endpoint, $bucket) {
         try {
-            $client = new OssClient($accessKeyId, $accessKeySecret, $endpoint, False);
+            $client = new OssClient($accessKeyId, $accessKeySecret, $endpoint, false);
             if ($client->doesBucketExist($bucket)) {
-                return array(
-                    "status" => 1,
-                    "msg" => "Bucket 存在!",
-                );
+                return array("status" => 1, "msg" => "Bucket 存在!");
             } else {
-                return array(
-                    "status" => 0,
-                    "msg" => "Bucket 不存在!",
-                );
+                return array("status" => 0, "msg" => "Bucket 不存在!");
             }
         } catch (OssException $e) {
-            return array("status" => -1, "msg" => $e->getMessage(),);
+            return array("status" => -1, "msg" => $e->getMessage());
         }
     }
 
-    /**
-     * 上传文件到OSS
-     * @param $object : 文件名称
-     * @param $filePath : 需要上传的文件路径，例如/users/local/my_file.txt
-     */
     public function Upload($object, $filePath) {
-        try{
-            // 判读对象是否存在！
-//            $exist = $this->client->doesObjectExist($this->options['bucket'], $object);
-//            if (!$exist) {
-            $this->client->uploadFile($this->options['bucket'], $object, $filePath);
-//            } else {
-//                $this->errors[] = "该object或object name已存在！";
-//            }
-        } catch(OssException $e) {
-            $this->errors[] = $e->getMessage();
-//            return;
+        if ($this->client === null) {
+            $err = implode('; ', $this->errors);
+            if ($err === '' && defined('WP_DEBUG') && WP_DEBUG && function_exists('error_log')) {
+                $err = 'options keys: ' . implode(',', array_keys($this->options));
+            }
+            if (defined('WP_DEBUG') && WP_DEBUG && function_exists('error_log')) {
+                error_log('[WPOSS] 客户端未初始化: ' . $err);
+            }
+            throw new \RuntimeException($err ?: 'OSS 客户端未初始化');
+        }
+        try {
+            $path = is_string($filePath) && $filePath !== '' ? $filePath : '';
+            if ($path === '' || !file_exists($path)) {
+                throw new \InvalidArgumentException('文件不存在: ' . $filePath);
+            }
+            $path = realpath($path) ?: $path;
+            $this->client->uploadFile($this->options['bucket'], $object, $path);
+        } catch (OssException $e) {
+            $msg = trim($e->getMessage());
+            $detail = $msg;
+            if ($msg === '' || preg_match('/^[\s:]*RequestId:\s*$/i', $msg)) {
+                $parts = array();
+                if (method_exists($e, 'getHTTPStatus')) {
+                    $parts[] = 'HTTP=' . $e->getHTTPStatus();
+                }
+                if (method_exists($e, 'getErrorCode')) {
+                    $parts[] = 'Code=' . $e->getErrorCode();
+                }
+                $detail = 'OSS 请求失败(网络/连接异常) ' . implode(' ', $parts) . ' endpoint=' . ($this->options['endpoint'] ?? '');
+            }
+            $this->errors[] = $detail;
+            throw $e;
         }
     }
 
-    /**
-     * 删除远程OSS对象
-     * @param $objects
-     */
     public function Delete($objects) {
-        // object不存在时，也返回正常的响应
-        $this->client->deleteObjects($this->options['bucket'], $objects);
+        if ($this->client === null || empty($objects)) {
+            return;
+        }
+        try {
+            $this->client->deleteObjects($this->options['bucket'], $objects);
+        } catch (OssException $e) {
+            $this->errors[] = $e->getMessage();
+        }
     }
 
-
-    /**
-     * 远程OSS对象是否存在
-     * @param $object
-     * @return bool
-     */
     public function hasExist($object) {
-        try{
-			return $this->client->doesObjectExist($this->options['bucket'], $object);
-        } catch(OssException $e) {
-            return False;
+        if ($this->client === null) {
+            return false;
+        }
+        try {
+            return $this->client->doesObjectExist($this->options['bucket'], $object);
+        } catch (OssException $e) {
+            return false;
         }
     }
 }
