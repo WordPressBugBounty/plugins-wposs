@@ -16,7 +16,7 @@
    <div class="laobuluo-wbs-header" style="margin-bottom: 15px;">
              <div class="laobuluo-wbs-logo"><span class="wbs-span">WPOSS - 阿里云对象存储插件</span><span class="wbs-free">Free V5.0</span></div>
             <div class="laobuluo-wbs-btn">
-                 <a class="layui-btn layui-btn-primary" href="https://www.lezaiyun.com/1095.html" target="_blank"><i class="layui-icon layui-icon-home"></i> 插件主页</a>
+                 <a class="layui-btn layui-btn-primary" href="https://www.lezaiyun.com/cloud-disk.html" target="_blank"><i class="layui-icon layui-icon-home"></i> 插件主页</a>
                  <a class="layui-btn layui-btn-primary" href="https://www.lezaiyun.com/contact/" target="_blank"><i class="layui-icon layui-icon-release"></i> 技术支持</a>
             </div>
        </div>

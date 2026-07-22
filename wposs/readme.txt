@@ -3,13 +3,11 @@ Contributors: laobuluo
 Donate link: https://www.lezaiyun.com/donate/
 Tags:阿里云oss,oss,对象存储,wordpress oss
 Requires at least: 5.5
-Tested up to: 6.9.1
+Tested up to: 7.0
 Stable tag: 5.0
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
-
-WordPress阿里云对象存储插件（简称:WPOSS），基于阿里云OSS对象存储与WordPress实现静态资源到OSS存储。支持阿里云OSS图片编辑，水印、裁剪、压缩等。
 
 == Description ==
 
@@ -27,13 +25,13 @@ WordPress阿里云对象存储插件（简称:WPOSS），基于阿里云OSS对�
 8. 支持本地和对象存储分离和同步
 9. 2020年重构代码改变传统逻辑模型
 
-阿里云对象存储插件安装方法：[https://www.lezaiyun.com/?p=1095](https://www.lezaiyun.com/?p=1095)
-
 ## 网站支持
 
-* [老蒋玩运营](https://www.laojiang.me/ "老蒋玩运营")
+This plugin is developed by **Lezaiyun Studio** and maintained by LaoJiang.
 
-* [主机评价网](https://www.zhujipingjia.com/ "主机评价网")
+🔗 Official product page: [https://www.lezaiyun.com/cloud-disk.html](https://www.lezaiyun.com/cloud-disk.html)
+
+👤 Developer Blog: [https://www.laojiang.me](https://www.laojiang.me)
 
 * 欢迎加入插件和站长微信公众号：老蒋朋友圈（公众号）
 
